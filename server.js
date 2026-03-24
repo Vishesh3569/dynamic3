@@ -1,11 +1,12 @@
 require('dotenv').config();
-
 const express = require('express');
 const mongoose = require('mongoose');
 const path = require('path');
-const os = require('os');
 
 const app = express();
+
+// Required to parse incoming JSON payloads
+app.use(express.json());
 
 const MONGO_URI = process.env.MONGODB_URI;
 const PORT = process.env.PORT || 8080;
@@ -30,30 +31,44 @@ mongoose.connection.on('disconnected', () => {
     console.warn("MongoDB connection lost.");
 });
 
+// --- NEW LOGIC: Project Idea Tracker ---
+
+const ideaSchema = new mongoose.Schema({
+    title: { type: String, required: true, trim: true },
+    description: { type: String, required: true, trim: true },
+    createdAt: { type: Date, default: Date.now }
+});
+
+const Idea = mongoose.model('Idea', ideaSchema);
+
 app.use(express.static(path.join(__dirname, 'public')));
 
-app.get('/api/metrics', (req, res) => {
-    const dbState = mongoose.connection.readyState;
-    const stateMap = {
-        0: 'Connection Lost',
-        1: 'Connected',
-        2: 'Connecting',
-        3: 'Disconnecting',
-        99: 'Uninitialized'
-    };
-
+// Create a new idea
+app.post('/api/ideas', async (req, res) => {
     try {
-        const metrics = {
-            uptime: process.uptime(),
-            freemem: os.freemem(),
-            totalmem: os.totalmem(),
-            platform: os.platform(),
-            cpus: os.cpus().length,
-            database: stateMap[dbState] || 'Unknown'
-        };
-        res.status(200).json(metrics);
+        const { title, description } = req.body;
+        if (!title || !description) {
+            return res.status(400).json({ error: 'Title and description are required.' });
+        }
+        
+        const newIdea = new Idea({ title, description });
+        await newIdea.save();
+        
+        res.status(201).json(newIdea);
     } catch (error) {
-        console.error('Metrics generation error:', error);
+        console.error('Error saving idea:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Retrieve all ideas
+app.get('/api/ideas', async (req, res) => {
+    try {
+        // Fetch latest 50 ideas
+        const ideas = await Idea.find().sort({ createdAt: -1 }).limit(50);
+        res.status(200).json(ideas);
+    } catch (error) {
+        console.error('Error fetching ideas:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
